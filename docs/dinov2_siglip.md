@@ -32,6 +32,15 @@ cd pid
 #    the runtime deps the upstream code actually needs, plus pin transformers
 #    to 4.57.x — Scale-RAE's custom Qwen LM is tightly coupled to the 4.x API
 #    and silently produces garbage embeddings on transformers 5.x.
+#
+#    Expected: the second `pip install` prints ~10 lines of
+#      "scale-rae 1.0.0 requires <pkg>==<old-version>, but you have …"
+#    These warnings are by design — Scale-RAE's pyproject pins ancient
+#    versions of peft / torchtext / accelerate / transformers / tokenizers
+#    that we deliberately ignore via `--no-deps` above. The PiD inference
+#    code only exercises the parts of Scale-RAE that work with the newer
+#    versions; from_ldm_siglip / from_clean_siglip have been verified
+#    end-to-end against the versions installed below.
 pip install --no-deps -e ../Scale-RAE
 pip install torchdiffeq timm omegaconf ezcolorlog shortuuid open_clip_torch accelerate
 
