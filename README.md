@@ -24,10 +24,10 @@ space and produces a super-resolved image in one pass.
 [Xuanchi Ren](https://xuanchiren.com/) <br>
 
 ## News
-- 🚀 **[May 25, 2026]** Paper, code, and model weights released, with PiD options for **FLUX**, **FLUX.2**, **Z-Image**, **SD3**, **DINOv2**, and **SigLIP**.
-- 🔜 **[Coming Soon]** PiD option for **Qwen-Image**.
-- 🔜 **[Coming Soon]** PiD undistilled checkpoints.
-- ⏳ **[Planned]** Training scripts.
+- 🚀 [May 25, 2026] Paper, code, and model weights released, with PiD options for **FLUX**, **FLUX.2**, **Z-Image**, **SD3**, **DINOv2**, and **SigLIP**.
+- 🔜 [Coming Soon] PiD option for **Qwen-Image**.
+- 🔜 [Coming Soon] PiD undistilled checkpoints.
+- ⏳ [Planned] Training scripts.
 
 ## Installation
 
