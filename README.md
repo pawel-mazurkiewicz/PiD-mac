@@ -4,7 +4,12 @@
   <img src="figures/teaser.jpg" alt="PiD teaser" width="100%">
 </p>
 
-https://github.com/user-attachments/assets/e8a3e882-7a49-4867-b3f3-c3dee3c54c4f
+
+
+
+https://github.com/user-attachments/assets/a556e2d4-5de5-4bcf-9daa-80f7ea6b2124
+
+
 
 
 PiD reformulates the latent-to-pixel decoder as a conditional pixel-space diffusion
@@ -97,7 +102,7 @@ init log; for `2k` that line is absent. Both `2k` and `2kto4k` support non-squar
 
 Runs the corresponding latent-diffusion backbone on a prompt (or class id for
 the class-conditional `dinov2` backbone), captures the intermediate `x_t` at
-user-specified denoising steps and the final clean `x_0`, then decodes
+user-specified denoising steps (early LDM termination) and the final clean `x_0`, then decodes
 each captured latent with both the native VAE / RAE decoder (baseline) and PiD.
 
 For `flux` / `flux2` / `sd3` / `zimage` the LDM is a HuggingFace `diffusers`
@@ -114,7 +119,7 @@ For `dinov2` and `siglip` the LDM is the upstream
 ```bash
 PYTHONPATH=. python -m pid._src.inference.from_ldm_flux \
     --prompt "A photorealistic half-body portrait of a brown tabby cat with bold stripes sitting attentively on a rustic wooden kitchen table, soft morning light streaming sideways through a large window, fine fur detail and stripe patterns sharply visible, intense amber-green eyes in razor-sharp focus, warm farmhouse kitchen softly out of focus, cinematic shallow depth of field, ultra-detailed fur texture, photorealistic" \
-    --ldm_inference_steps 28 --save_xt_steps 22 24 26 \
+    --ldm_inference_steps 28 --save_xt_steps 24 \
     --output_dir ./results/official_demo/flux \
     --cfg_scale 1 --pid_inference_steps 4 --scale 4
 ```
@@ -128,7 +133,7 @@ so the LDM produces a 1024² latent and PiD decodes it to 4K.
 PYTHONPATH=. python -m pid._src.inference.from_ldm_flux \
     --prompt "A photorealistic half-body portrait of a brown tabby cat with bold stripes sitting attentively on a rustic wooden kitchen table, soft morning light streaming sideways through a large window, fine fur detail and stripe patterns sharply visible, intense amber-green eyes in razor-sharp focus, warm farmhouse kitchen softly out of focus, cinematic shallow depth of field, ultra-detailed fur texture, photorealistic" \
     --resolution 1024 --pid_ckpt_type 2kto4k \
-    --ldm_inference_steps 28 --save_xt_steps 22 24 26 \
+    --ldm_inference_steps 28 --save_xt_steps 24 \
     --output_dir ./results/official_demo/flux_4k \
     --cfg_scale 1 --pid_inference_steps 4 --scale 4
 ```
@@ -142,7 +147,7 @@ PYTHONPATH=. python -m pid._src.inference.from_ldm_flux \
 PYTHONPATH=. torchrun --nproc_per_node=4 \
     -m pid._src.inference.from_ldm_zimage \
     --prompt_file pid/_src/inference/prompts/prompt_creative.txt \
-    --ldm_inference_steps 50 --save_xt_steps 44 46 48 \
+    --ldm_inference_steps 50 --save_xt_steps 46 \
     --output_dir ./results/official_demo/zimage \
     --cfg_scale 1 --pid_inference_steps 4 --scale 4
 ```
@@ -157,12 +162,12 @@ examples.
 
 (See each script's docstring for the exact recipe.)
 
-| Backbone | LDM steps flag          | Default steps | `--save_xt_steps` (example) | Best LDM termination steps |
+| Backbone | LDM steps flag          | Default steps | `--save_xt_steps` (example) | Best `--save_xt_steps` |
 |----------|-------------------------|---------------|-----------------------------|----------------------|
-| flux     | `--ldm_inference_steps` | 28            | `18 20 22 24 26`         | 24  |
-| sd3      | `--ldm_inference_steps` | 28            | `18 20 22 24 26`         | 24  |
-| flux2    | `--ldm_inference_steps` | 50            | `40 42 44 46 48`         | 46  |
-| zimage   | `--ldm_inference_steps` | 50            | `40 42 44 46 48`         | 46  |
+| flux     | `--ldm_inference_steps` | 28            | `22 24 26`         | 24  |
+| sd3      | `--ldm_inference_steps` | 28            | `22 24 26`         | 24  |
+| flux2    | `--ldm_inference_steps` | 50            | `44 46 48`         | 46  |
+| zimage   | `--ldm_inference_steps` | 50            | `44 46 48`         | 46  |
 
 ---
 ### 📗 `from_clean_*`: image → VAE encode → PiD decode
