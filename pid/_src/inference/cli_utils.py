@@ -17,12 +17,14 @@ from pid._src.inference.pipeline_registry import PIPELINE_REGISTRY
 LDM_BACKBONES = [
     "flux",
     "flux2",
+    "flux2-klein-4b",
+    "flux2-klein-9b",
     "sd3",
     "sdxl",
     "qwenimage",
-    "qwenimage_2512",
+    "qwenimage-2512",
     "zimage",
-    "zimage_turbo",
+    "zimage-turbo",
     "dinov2",
     "siglip",
 ]

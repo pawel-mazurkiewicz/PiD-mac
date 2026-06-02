@@ -16,12 +16,14 @@
 # Backbone-tag namespace:
 #   flux           Flux1-dev (16-ch VAE)                  LDM + from_clean   (2k + 2kto4k)
 #   flux2          Flux2-dev (128-ch BN VAE)              LDM + from_clean   (2k + 2kto4k)
+#   flux2-klein-4b FLUX.2-klein-4B (same Flux2 BN VAE)    LDM only — aliases to flux2 (2k + 2kto4k)
+#   flux2-klein-9b FLUX.2-klein-9B (same Flux2 BN VAE)    LDM only — aliases to flux2 (2k + 2kto4k)
 #   sd3            SD3 medium (16-ch VAE)                 LDM + from_clean   (2k + 2kto4k)
 #   sdxl           SDXL (4-ch VAE, VP-frame student)      LDM + from_clean   (2kto4k only)
 #   qwenimage      Qwen-Image (16-ch 3D VAE)              LDM + from_clean   (2kto4k only)
-#   qwenimage_2512 Qwen-Image-2512 (Dec 2025 refresh)     LDM only — aliases to qwenimage (2kto4k only)
+#   qwenimage-2512 Qwen-Image-2512 (Dec 2025 refresh)     LDM only — aliases to qwenimage (2kto4k only)
 #   zimage         ZImage (Flux1's 16-ch VAE)             LDM only — reuses Flux1 model (2k + 2kto4k)
-#   zimage_turbo   ZImage-Turbo (same 16-ch VAE)          LDM only — reuses Flux1 model (2k + 2kto4k)
+#   zimage-turbo   ZImage-Turbo (same 16-ch VAE)          LDM only — reuses Flux1 model (2k + 2kto4k)
 #   dinov2         DINOv2-B + RAE ViT-XL (768-ch RAE)     LDM + from_clean   (2k only, sr4x)
 #   siglip         SigLIP-2 So400M + Scale-RAE ViT-XL     LDM + from_clean   (2k only, sr8x)
 #
@@ -105,12 +107,18 @@ PID_CHECKPOINT_REGISTRY: dict[tuple[str, str], PIDCheckpoint] = {
 # ZImage and ZImage-Turbo use Flux1's 16-ch VAE for both ckpt types → alias to
 # the flux entries. Keep explicit aliases (vs. duplicating) so updating "flux"
 # updates these backbones too.
-PID_CHECKPOINT_REGISTRY[("zimage_turbo", "2k")] = PID_CHECKPOINT_REGISTRY[("flux", "2k")]
+PID_CHECKPOINT_REGISTRY[("zimage-turbo", "2k")] = PID_CHECKPOINT_REGISTRY[("flux", "2k")]
 PID_CHECKPOINT_REGISTRY[("zimage", "2kto4k")] = PID_CHECKPOINT_REGISTRY[("flux", "2kto4k")]
-PID_CHECKPOINT_REGISTRY[("zimage_turbo", "2kto4k")] = PID_CHECKPOINT_REGISTRY[("flux", "2kto4k")]
+PID_CHECKPOINT_REGISTRY[("zimage-turbo", "2kto4k")] = PID_CHECKPOINT_REGISTRY[("flux", "2kto4k")]
 # Qwen-Image-2512 (Dec 2025 refresh) shares the AutoencoderKLQwenImage and uses the
 # same PiD student as Qwen-Image — only the transformer/text-encoder differ.
-PID_CHECKPOINT_REGISTRY[("qwenimage_2512", "2kto4k")] = PID_CHECKPOINT_REGISTRY[("qwenimage", "2kto4k")]
+PID_CHECKPOINT_REGISTRY[("qwenimage-2512", "2kto4k")] = PID_CHECKPOINT_REGISTRY[("qwenimage", "2kto4k")]
+# FLUX.2-klein (Flux2KleinPipeline / FLUX.2-klein-4B & -9B) shares the AutoencoderKLFlux2
+# and uses the same PiD student as Flux2 — only the transformer/text-encoder differ.
+# Both size variants alias to the same flux2 decoders.
+for _klein in ("flux2-klein-4b", "flux2-klein-9b"):
+    PID_CHECKPOINT_REGISTRY[(_klein, "2k")] = PID_CHECKPOINT_REGISTRY[("flux2", "2k")]
+    PID_CHECKPOINT_REGISTRY[(_klein, "2kto4k")] = PID_CHECKPOINT_REGISTRY[("flux2", "2kto4k")]
 
 
 def get_pid_checkpoint(backbone: str, ckpt_type: str = "2k") -> PIDCheckpoint:
