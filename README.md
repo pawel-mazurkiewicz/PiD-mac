@@ -24,9 +24,9 @@ space and produces a super-resolved image in one pass.
 [Xuanchi Ren](https://xuanchiren.com/) <br>
 
 ## News
-- 🔥 [June 1, 2026] PiD checkpoints for **SDXL**, **Qwen-Image** and **Qwen-Image-2512** are released. Check [HuggingFace](https://huggingface.co/nvidia/PiD).
-- 🔥 [June 1, 2026] A new checkpoint for **FLUX.2 (2kto4k)** (with `_2606` suffix) that has no color drifting issue is released. See [here](docs/FLUX2_2kto4k_new_ckpt_compare.md) for comparison with the old one.
-- 🔥 [June 1, 2026] We clean up the codebase and remove useless code.
+- 🔥 [June 2, 2026] PiD checkpoints for **SDXL**, **Qwen-Image** and **Qwen-Image-2512** are released. Check [HuggingFace](https://huggingface.co/nvidia/PiD).
+- 🔥 [June 2, 2026] A new checkpoint for **FLUX.2 (2kto4k)** (with `_2606` suffix) that has no color drifting issue is released. See [here](docs/FLUX2_2kto4k_new_ckpt_compare.md) for comparison with the old one.
+- 🔥 [June 2, 2026] We clean up the codebase and remove useless code.
 - 🚀 [May 27, 2026] PiD is now in [ComfyUI](https://github.com/Comfy-Org/ComfyUI/pull/14103)!
 - 🚀 [May 25, 2026] Paper, code, and model weights released, with PiD options for **FLUX**, **FLUX.2**, **Z-Image**, **Z-Image-Turbo**, **SD3**, **DINOv2**, and **SigLIP**.
 - 🔜 [Coming Soon] PiD undistilled checkpoints.
