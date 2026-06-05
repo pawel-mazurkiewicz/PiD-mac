@@ -59,6 +59,13 @@ def _enable_mps_fallback() -> None:
 def _resolve_device(prefer: DeviceLike = None) -> torch.device:
     if prefer is not None and str(prefer) != "auto":
         dev = torch.device(prefer)
+        if dev.type == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("Requested --device 'cuda' but CUDA is not available on this machine.")
+        if dev.type == "mps" and not torch.backends.mps.is_available():
+            raise RuntimeError(
+                "Requested --device 'mps' but MPS is not available "
+                "(needs Apple Silicon and a PyTorch build with MPS support)."
+            )
     elif torch.backends.mps.is_available():
         dev = torch.device("mps")
     elif torch.cuda.is_available():

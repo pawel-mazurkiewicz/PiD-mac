@@ -444,7 +444,10 @@ class Config:
         import torch.distributed as dist
 
         if dist.is_available() and dist.is_initialized():
-            job_name_tensor = torch.ByteTensor(bytearray(self.job.name, "utf-8")).cuda()
+            job_name_tensor = torch.ByteTensor(bytearray(self.job.name, "utf-8"))
+            # NCCL requires the tensor on GPU; gloo (and other CPU backends) broadcast on CPU.
+            if dist.get_backend() == "nccl":
+                job_name_tensor = job_name_tensor.cuda()
             distributed.broadcast(job_name_tensor, 0)
             self.job.name = job_name_tensor.cpu().numpy().tobytes().decode("utf-8")
 
