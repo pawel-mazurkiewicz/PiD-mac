@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torch.distributed import ProcessGroup
 from torch.nn.functional import scaled_dot_product_attention
 
+from pid._src.utils import device_utils
 from pid._src.utils.context_parallel import cat_outputs_cp_with_grad
 
 # =============================================================================
@@ -285,7 +286,7 @@ class RotaryAttention(nn.Module):
         k = k.view(B, -1, self.num_heads, C // self.num_heads).transpose(1, 2).contiguous()
         v = v.view(B, -1, self.num_heads, C // self.num_heads).transpose(1, 2).contiguous()
 
-        x = scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
+        x = device_utils.mps_safe_sdpa(q, k, v, attn_mask=mask, dropout_p=0.0)
 
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
@@ -616,7 +617,7 @@ class MMDiTJointAttention(nn.Module):
         k_joint = torch.cat([ky, kx], dim=2)  # [B, H, Ny + Nx_full,  Hc]
         v_joint = torch.cat([vy, vx], dim=2)
 
-        out_joint = F.scaled_dot_product_attention(q_joint, k_joint, v_joint, dropout_p=0.0, attn_mask=attn_mask)
+        out_joint = device_utils.mps_safe_sdpa(q_joint, k_joint, v_joint, dropout_p=0.0, attn_mask=attn_mask)
         # Split back to [text, image]; image output is local under CP.
         out_y = out_joint[:, :, :Ny, :]
         out_x = out_joint[:, :, Ny:, :]

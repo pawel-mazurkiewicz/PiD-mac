@@ -155,3 +155,50 @@ def setup_backends(device: DeviceLike = None) -> None:
         torch.backends.cuda.matmul.allow_tf32 = True
     elif dev.type == "mps":
         _enable_mps_fallback()
+
+
+def mps_safe_sdpa(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
+    """scaled_dot_product_attention that stays correct on Apple Silicon (MPS).
+
+    PyTorch's fused MPS SDPA kernel returns *increasingly wrong* outputs past a few
+    thousand key tokens (a long-standing Metal kernel bug), which shows up as a regular
+    grid/tile artifact in high-resolution outputs. On MPS we therefore compute attention
+    explicitly — matmul -> softmax -> matmul in fp32 — chunked over the query dim to
+    bound peak memory to [B, H, q_chunk, S] instead of the full [B, H, S, S]. This is
+    exact at any sequence length. Off MPS we defer to the fused kernel.
+
+    q/k/v are [..., S, head_dim] (the standard SDPA layout). dropout is ignored on the
+    MPS path (inference only; callers pass dropout_p=0.0). is_causal is not used by PiD
+    and is unsupported here.
+    """
+    import math
+
+    import torch.nn.functional as F
+
+    if query.device.type != "mps":
+        return F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale
+        )
+    if is_causal:
+        raise NotImplementedError("mps_safe_sdpa does not implement is_causal (unused by PiD).")
+
+    if scale is None:
+        scale = 1.0 / math.sqrt(query.shape[-1])
+    seq_q = query.shape[-2]
+    key_t = key.transpose(-2, -1)
+    out = torch.empty(*query.shape[:-1], value.shape[-1], device=query.device, dtype=query.dtype)
+    q_chunk = 1024
+    for start in range(0, seq_q, q_chunk):
+        end = min(start + q_chunk, seq_q)
+        scores = (query[..., start:end, :].float() @ key_t.float()) * scale
+        if attn_mask is not None:
+            m = attn_mask
+            if m.dim() == scores.dim() and m.shape[-2] not in (1, scores.shape[-2]):
+                m = m[..., start:end, :]
+            if m.dtype == torch.bool:
+                scores = scores.masked_fill(~m, float("-inf"))
+            else:
+                scores = scores + m
+        out[..., start:end, :] = (scores.softmax(dim=-1) @ value.float()).to(out.dtype)
+        del scores
+    return out
