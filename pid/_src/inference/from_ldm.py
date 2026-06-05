@@ -77,6 +77,7 @@ from pid._src.inference.pipeline_registry import (
     load_pipeline,
 )
 from pid._src.inference.step_capture import XtCaptureCallback
+from pid._src.utils import device_utils
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -90,6 +91,10 @@ def run_ldm_demo(args):
     rank, world_size = get_rank_and_world_size()
     maybe_init_distributed(world_size, rank)
     is_rank0 = rank == 0
+
+    device_utils.init_device(args.device)
+    device_utils.init_dtype(args.dtype)
+    device = device_utils.get_device()
 
     # ---- Resolve backbone defaults ----
     pipe_cfg_default = PIPELINE_REGISTRY[backbone]
@@ -105,7 +110,7 @@ def run_ldm_demo(args):
     H, W = H_out // args.scale, W_out // args.scale
     ldm_inference_steps = args.ldm_inference_steps or pipe_cfg_default.default_num_inference_steps
     guidance_scale = args.guidance_scale if args.guidance_scale is not None else pipe_cfg_default.default_guidance_scale
-    dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
+    dtype = device_utils.resolve_dtype(device)
 
     # Validate xt step indices against the resolved ldm_inference_steps.
     save_xt_set = set(args.save_xt_steps) if args.save_xt_steps else set()
@@ -163,7 +168,7 @@ def run_ldm_demo(args):
     for prompt_idx, prompt in indexed_prompts:
         seed = args.seed + prompt_idx
         sample_id = f"{prompt_idx:08d}"
-        generator = torch.Generator(device="cuda").manual_seed(seed)
+        generator = device_utils.make_generator(device, seed)
 
         xt_cb = XtCaptureCallback(save_xt_set, pipe_cfg) if save_xt_set else None
 

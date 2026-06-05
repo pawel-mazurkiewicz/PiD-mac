@@ -39,6 +39,7 @@ from pid._ext.imaginaire.utils import log
 from pid._ext.imaginaire.utils.distributed import get_rank, sync_model_states
 from pid._src.models.utils import load_state_dict
 from pid._src.tokenizers.interface import VideoTokenizerInterface
+from pid._src.utils import device_utils
 
 __all__ = [
     "AutoEncoder",
@@ -432,7 +433,7 @@ class FluxVAE:
             self.model = self.model.to(dtype=dtype)
             self.context = nullcontext()
         else:
-            self.context = torch.amp.autocast("cuda", dtype=dtype)
+            self.context = torch.amp.autocast(torch.device(device).type, dtype=dtype)
 
     def count_param(self):
         return sum(p.numel() for p in self.model.parameters())
@@ -468,7 +469,8 @@ class FluxVAEInterface(VideoTokenizerInterface):
 
     def __init__(self, chunk_duration: int = 1, **kwargs):
         self.model = FluxVAE(
-            dtype=torch.bfloat16,
+            dtype=device_utils.resolve_dtype(),
+            device=device_utils.get_device(),
             is_amp=False,
             vae_pth=kwargs.get("vae_pth", "./checkpoints/ae.safetensors"),
             s3_credential_path=kwargs.get("s3_credential_path", "credentials/s3_training.secret"),
@@ -694,7 +696,7 @@ class SD3VAE:
             self.model = self.model.to(dtype=dtype)
             self.context = nullcontext()
         else:
-            self.context = torch.amp.autocast("cuda", dtype=dtype)
+            self.context = torch.amp.autocast(torch.device(device).type, dtype=dtype)
 
     def count_param(self):
         return sum(p.numel() for p in self.model.parameters())

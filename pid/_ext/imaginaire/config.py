@@ -439,10 +439,14 @@ class Config:
         """Validate that the config has all required fields."""
 
         # broadcast job.name across all ranks to make sure it is consistent
-        # otherwise, unaligned job names leads unaligned path to save checkpoints
-        job_name_tensor = torch.ByteTensor(bytearray(self.job.name, "utf-8")).cuda()
-        distributed.broadcast(job_name_tensor, 0)
-        self.job.name = job_name_tensor.cpu().numpy().tobytes().decode("utf-8")
+        # otherwise, unaligned job names leads unaligned path to save checkpoints.
+        # Only meaningful under distributed (multi-GPU/NCCL); skip single-process.
+        import torch.distributed as dist
+
+        if dist.is_available() and dist.is_initialized():
+            job_name_tensor = torch.ByteTensor(bytearray(self.job.name, "utf-8")).cuda()
+            distributed.broadcast(job_name_tensor, 0)
+            self.job.name = job_name_tensor.cpu().numpy().tobytes().decode("utf-8")
 
         assert self.job.project != ""
         assert self.job.group != ""

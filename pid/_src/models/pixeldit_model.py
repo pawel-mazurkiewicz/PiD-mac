@@ -18,6 +18,7 @@ from torch import Tensor
 from pid._ext.imaginaire.lazy_config import instantiate as lazy_instantiate
 from pid._ext.imaginaire.model import ImaginaireModel
 from pid._ext.imaginaire.utils import misc
+from pid._src.utils import device_utils
 from pid._src.utils.context_parallel import broadcast as cp_broadcast
 from pid._src.utils.context_parallel import robust_broadcast
 
@@ -83,7 +84,7 @@ _TEXT_ENCODER_DICT = {
 }
 
 
-def _load_text_encoder(name: str, device: str = "cuda"):
+def _load_text_encoder(name: str, device="cuda", dtype=torch.bfloat16):
     import torch.distributed as dist
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -98,7 +99,7 @@ def _load_text_encoder(name: str, device: str = "cuda"):
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.padding_side = "right"
-    text_encoder = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16).get_decoder().to(device)
+    text_encoder = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype).get_decoder().to(device)
     text_encoder.eval()
     text_encoder.requires_grad_(False)
 
@@ -130,19 +131,20 @@ class PixelDiTModel(ImaginaireModel):
                 f"base_image_size={_ds['base_image_size_for_shift_calc']}"
             )
 
-        _dtype_map = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}
-        requested_dtype = _dtype_map[config.precision]
-        if requested_dtype != torch.float32:
-            self.autocast_dtype = requested_dtype
-            self.precision = torch.float32
-        else:
-            self.autocast_dtype = None
-            self.precision = torch.float32
-        self.tensor_kwargs = {"device": "cuda", "dtype": self.precision}
+        # Resolve compute backend + dtype. Weights stay fp32; reduced precision (CUDA
+        # default bf16) is applied via autocast. On MPS/CPU the default is pure fp32.
+        self.device = device_utils.get_device()
+        # config.precision is the per-experiment CUDA default (back-compat); it applies only
+        # on CUDA. An explicit --dtype overrides everything; MPS/CPU fall back to fp32.
+        _cfg_precision = config.precision if self.device.type == "cuda" else None
+        target_dtype = device_utils.resolve_dtype(self.device, requested=_cfg_precision)
+        self.autocast_dtype = target_dtype if target_dtype != torch.float32 else None
+        self.precision = torch.float32
+        self.tensor_kwargs = {"device": str(self.device), "dtype": self.precision}
 
         with misc.timer("PixelDiTModel: build_net"):
             self.net = lazy_instantiate(config.net)
-            self.net = self.net.to(device="cuda", dtype=torch.float32)
+            self.net = self.net.to(device=self.device, dtype=torch.float32)
             self.net.requires_grad_(True)
             if hasattr(self.net, "init_weights"):
                 self.net.init_weights()
@@ -151,7 +153,9 @@ class PixelDiTModel(ImaginaireModel):
         # Frozen text encoder. Use object.__setattr__ so DCP / nn.Module don't try to
         # register it as a child / save it in state_dict.
         with misc.timer("PixelDiTModel: load_text_encoder"):
-            _tokenizer, _text_encoder = _load_text_encoder(config.text_encoder_name, device="cuda")
+            _tokenizer, _text_encoder = _load_text_encoder(
+                config.text_encoder_name, device=self.device, dtype=self.autocast_dtype or torch.float32
+            )
             object.__setattr__(self, "tokenizer", _tokenizer)
             object.__setattr__(self, "text_encoder", _text_encoder)
             self._chi_prompt_str = "\n".join(config.chi_prompt) if config.chi_prompt else ""
@@ -180,6 +184,12 @@ class PixelDiTModel(ImaginaireModel):
         `generate_samples_from_batch` call once the output (H, W) is known (see
         `_maybe_compile_net`). Standard SR path only — context-parallel and the
         encoder-decoder path are not supported under compile."""
+        if self.device.type != "cuda":
+            logger.warning(
+                f"--compile is only supported on CUDA; ignoring on device '{self.device.type}' "
+                "(Inductor MPS/CPU backends are not used here)."
+            )
+            return
         assert not getattr(self.net, "is_context_parallel_enabled", False) and self.net._cp_group is None, (
             "--compile is incompatible with context parallel; disable CP first."
         )
@@ -200,7 +210,7 @@ class PixelDiTModel(ImaginaireModel):
                 image_height=image_h,
                 image_width=image_w,
                 text_length=text_len,
-                device="cuda",
+                device=str(self.device),
                 pixel_dtype=self.precision,
             )
             # mode="default": fast compile, solid speedup. For more inference throughput
@@ -228,7 +238,7 @@ class PixelDiTModel(ImaginaireModel):
             padding="max_length",
             truncation=True,
             return_tensors="pt",
-        ).to("cuda")
+        ).to(self.device)
 
         caption_embs = self.text_encoder(caption_token.input_ids, caption_token.attention_mask)[0]
 

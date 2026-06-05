@@ -39,6 +39,8 @@ from typing import Optional
 
 import torch
 
+from pid._src.utils import device_utils
+
 # ---------------------------------------------------------------------------
 # Config dataclass
 # ---------------------------------------------------------------------------
@@ -246,7 +248,7 @@ def get_config(name: str) -> DiffusionPipelineConfig:
 
 
 def load_pipeline(
-    name: str, model_id: Optional[str] = None, dtype=torch.bfloat16, device: str = "cuda", cpu_offload: bool = False
+    name: str, model_id: Optional[str] = None, dtype=torch.bfloat16, device: Optional[str] = None, cpu_offload: bool = False
 ):
     """Dynamically import and load a diffusers pipeline.
 
@@ -270,7 +272,8 @@ def load_pipeline(
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     print(f"Loading {cfg.pipeline_class} from {model_id} (dtype={dtype}) ...")
     pipeline = PipelineClass.from_pretrained(model_id, torch_dtype=dtype, token=token)
-    if cpu_offload:
+    resolved = device_utils.get_device(device)
+    if cpu_offload and resolved.type == "cuda":
         # Only the active component (text encoder / transformer / VAE) lives on GPU at a time.
         # enable_model_cpu_offload() defaults to gpu_id=0 — must pass the correct device
         # explicitly for multi-GPU torchrun, otherwise all ranks pile onto GPU 0.
@@ -278,8 +281,10 @@ def load_pipeline(
         pipeline.enable_model_cpu_offload(gpu_id=gpu_id)
         print(f"Pipeline loaded with model CPU offload (gpu_id={gpu_id}).")
     else:
-        pipeline = pipeline.to(device)
-        print(f"Pipeline loaded on {device}.")
+        if cpu_offload:
+            print(f"--cpu_offload is CUDA-only; loading {name} fully onto {resolved}.")
+        pipeline = pipeline.to(resolved)
+        print(f"Pipeline loaded on {resolved}.")
     return pipeline, cfg
 
 

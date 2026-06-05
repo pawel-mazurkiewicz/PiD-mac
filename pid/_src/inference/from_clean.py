@@ -37,6 +37,7 @@ import torch
 
 from pid._src.inference.cli_utils import parse_clean_args
 from pid._src.inference.decoder import add_noise, load_our_decoder, vae_decode
+from pid._src.utils import device_utils
 from pid._src.inference.inference_utils import (
     AsyncUploader,
     build_tag,
@@ -59,6 +60,13 @@ def run_clean_demo(args):
     if world_size > 1:
         torch.cuda.set_device(rank)
     is_rank0 = rank == 0
+
+    device_utils.init_device(args.device)
+    device_utils.init_dtype(args.dtype)
+    device = device_utils.get_device()
+    compute_dtype = device_utils.resolve_dtype(device)
+    if is_rank0:
+        logger.info(f"Compute device: {device}  dtype: {compute_dtype}")
 
     tag = build_tag(args, backbone_tag)
     if is_rank0:
@@ -122,7 +130,7 @@ def run_clean_demo(args):
         # The image is fed at its native resolution (cropped to a 16-multiple). dinov2 / siglip
         # resize internally to their own fixed native interface, so the same preprocessing works
         # for every backbone.
-        input_tensor = load_input_image(image_path).to(dtype=torch.bfloat16, device="cuda")
+        input_tensor = load_input_image(image_path).to(dtype=compute_dtype, device=device)
         clean_latent = model.encode_lq_latent(input_tensor)  # [1, C, zH, zW]
 
         # ---- Derive VAE-native pixel size from the latent grid times the tokenizer's
@@ -156,8 +164,8 @@ def run_clean_demo(args):
             sigma_label = f"sigma_{sigma:.3f}"
 
             # Per-σ deterministic noise generator (re-seeded so the same σ always gives the same noise)
-            gen = torch.Generator(device="cuda").manual_seed(args.seed + idx)
-            latent = add_noise(clean_latent.float(), float(sigma), gen, backbone_tag).to(dtype=torch.bfloat16)
+            gen = device_utils.make_generator(device, args.seed + idx)
+            latent = add_noise(clean_latent.float(), float(sigma), gen, backbone_tag).to(dtype=compute_dtype)
 
             # VAE decode (baseline)
             with torch.no_grad():
@@ -166,8 +174,8 @@ def run_clean_demo(args):
             # Pixel decoder (ours). PiD conditions on LQ_latent + degrade_sigma + caption.
             data_batch = {
                 model.config.input_caption_key: [caption],
-                "LQ_latent": latent.to(dtype=torch.bfloat16, device="cuda"),
-                "degrade_sigma": torch.tensor([float(sigma)], device="cuda", dtype=torch.float32),
+                "LQ_latent": latent.to(**model.tensor_kwargs),
+                "degrade_sigma": torch.tensor([float(sigma)], device=model.tensor_kwargs["device"], dtype=torch.float32),
             }
             samples_out = model.generate_samples_from_batch(
                 data_batch,
