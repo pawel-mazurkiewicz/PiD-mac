@@ -12,6 +12,7 @@ from pid._ext.imaginaire.lazy_config import instantiate
 from pid._ext.imaginaire.utils import log, misc
 from pid._ext.imaginaire.utils.config_helper import get_config_module, override
 from pid._ext.imaginaire.utils.easy_io import easy_io
+from pid._src.utils import device_utils
 
 
 def load_model_from_checkpoint(
@@ -37,13 +38,14 @@ def load_model_from_checkpoint(
     misc.set_random_seed(seed=seed, by_rank=True)
     torch.backends.cudnn.deterministic = config.trainer.cudnn.deterministic
     torch.backends.cudnn.benchmark = config.trainer.cudnn.benchmark
-    torch.backends.cudnn.allow_tf32 = torch.backends.cuda.matmul.allow_tf32 = True
+    device = device_utils.get_device()
+    device_utils.setup_backends(device)
 
     if not enable_fsdp and hasattr(config.model.config, "fsdp_shard_size"):
         config.model.config.fsdp_shard_size = 1
 
     with misc.timer("instantiate model"):
-        model = instantiate(config.model).cuda()
+        model = instantiate(config.model).to(device)
         model.on_train_start()
 
     if checkpoint_path.endswith(".pth"):
@@ -67,6 +69,6 @@ def load_model_from_checkpoint(
     if not enable_fsdp:
         model = model.to(dtype=model.precision)
 
-    torch.cuda.empty_cache()
+    device_utils.empty_cache(device)
 
     return model, config

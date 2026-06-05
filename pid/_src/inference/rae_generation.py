@@ -20,6 +20,7 @@ import sys
 from typing import Optional
 
 import torch
+from pid._src.utils import device_utils
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,10 @@ def sample_rae_trajectory(
     """
     # DiTs are kept in fp32 (see `_load_dit` docstring) — bf16/fp16 acceleration
     # is delivered via autocast, mirroring upstream `sample_ddp.py:248`.
-    z = torch.randn(1, 768, 32, 32, generator=generator, device=device, dtype=torch.float32)
+    # The generator may live on CPU (MPS has no reliable device-resident RNG); draw on the
+    # generator's device, then move to the model device.
+    _gen_device = generator.device if generator is not None else "cpu"
+    z = torch.randn(1, 768, 32, 32, generator=generator, device=_gen_device, dtype=torch.float32).to(device=device)
     # Autoguidance requires duplicating the batch: conditional + null class.
     z = torch.cat([z, z], dim=0)
     y = torch.tensor([class_id, 1000], device=device)  # 1000 = null class
@@ -256,7 +260,7 @@ def sample_rae_trajectory(
     )
     use_autocast = dtype != torch.float32
     if use_autocast:
-        with torch.autocast(device_type="cuda", dtype=dtype):
+        with torch.autocast(device_type=torch.device(device).type, dtype=dtype):
             traj = sample_fn(z, dit_main.forward_with_autoguidance, **kwargs)
     else:
         traj = sample_fn(z, dit_main.forward_with_autoguidance, **kwargs)
@@ -412,7 +416,10 @@ def run_rae_demo(args):
     class_names_path = os.path.join(os.path.dirname(__file__), "prompts", "imagenet_classes.txt")
     class_names = load_class_names(class_names_path)
 
-    dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
+    device_utils.init_device(args.device)
+    device_utils.init_dtype(args.dtype)
+    device = device_utils.get_device()
+    dtype = device_utils.resolve_dtype(device)
 
     tag = build_tag(args, "dinov2")
     if is_rank0:
@@ -443,7 +450,7 @@ def run_rae_demo(args):
                     dit_main_ckpt=rae_dit_main_ckpt,
                     dit_guid_ckpt=rae_dit_guid_ckpt,
                     num_inference_steps=num_inference_steps,
-                    device="cuda",
+                    device=device,
                     dtype=dtype,
                 )
             dist.barrier()
@@ -456,7 +463,7 @@ def run_rae_demo(args):
             dit_main_ckpt=rae_dit_main_ckpt,
             dit_guid_ckpt=rae_dit_guid_ckpt,
             num_inference_steps=num_inference_steps,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
 
@@ -480,7 +487,7 @@ def run_rae_demo(args):
     for prompt_idx, cid in indexed_classes:
         seed = args.seed + prompt_idx
         sample_id = f"{prompt_idx:08d}"
-        gen = torch.Generator(device="cuda").manual_seed(seed)
+        gen = device_utils.make_generator(device, seed)
         caption = class_names[cid]
 
         logger.info(f"[{prompt_idx}] Sampling RAE trajectory (seed={seed}, class={cid}: {caption!r})")
@@ -489,7 +496,7 @@ def run_rae_demo(args):
             dit_main=dit_main,
             dit_guid=dit_guid,
             sample_fn=sample_fn,
-            device="cuda",
+            device=device,
             dtype=dtype,
             cfg_scale=args.rae_cfg_scale,
             cfg_interval=args.rae_cfg_interval,

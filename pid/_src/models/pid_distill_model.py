@@ -16,6 +16,7 @@ import attrs
 import torch
 
 from pid._src.models.pid_model import PidModel, PidModelConfig
+from pid._src.utils import device_utils
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,11 @@ class PidDistillModel(PidModel):
             return net_output.to(x_t.dtype)
         if prediction_type == "velocity":
             original_dtype = x_t.dtype
+            # MPS has no float64; use float32 high-precision there (CUDA/CPU keep float64).
+            hp = torch.float32 if x_t.device.type == "mps" else torch.float64
             s = [x_t.shape[0]] + [1] * (x_t.ndim - 1)
-            t_shaped = t.double().view(*s)
-            return (x_t.double() - t_shaped * net_output.double()).to(original_dtype)
+            t_shaped = t.to(hp).view(*s)
+            return (x_t.to(hp) - t_shaped * net_output.to(hp)).to(original_dtype)
         raise ValueError(f"Invalid prediction_type: {prediction_type}")
 
     def _net_output_to_velocity(
@@ -74,9 +77,11 @@ class PidDistillModel(PidModel):
             return net_output
         if prediction_type == "x0":
             original_dtype = x_t.dtype
+            # MPS has no float64; use float32 high-precision there (CUDA/CPU keep float64).
+            hp = torch.float32 if x_t.device.type == "mps" else torch.float64
             s = [x_t.shape[0]] + [1] * (x_t.ndim - 1)
-            t_shaped = t.double().view(*s).clamp(min=5e-2)
-            return ((x_t.double() - net_output.double()) / t_shaped).to(original_dtype)
+            t_shaped = t.to(hp).view(*s).clamp(min=5e-2)
+            return ((x_t.to(hp) - net_output.to(hp)) / t_shaped).to(original_dtype)
         raise ValueError(f"Invalid prediction_type: {prediction_type}")
 
     def _velocity_to_x0(self, x_t: torch.Tensor, net_output: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -122,7 +127,9 @@ class PidDistillModel(PidModel):
     ) -> torch.Tensor:
         B = noise.shape[0]
         timescale = self.fm_trainer.timescale
-        autocast_ctx = torch.autocast("cuda", dtype=self.autocast_dtype) if self.autocast_dtype else nullcontext()
+        autocast_ctx = (
+            torch.autocast(self.device.type, dtype=self.autocast_dtype) if self.autocast_dtype else nullcontext()
+        )
         x = noise
         net = net if net is not None else self.net
 
@@ -149,10 +156,10 @@ class PidDistillModel(PidModel):
                         x0_pred = self._velocity_to_x0(x, v_pred, t_cur_batch)
                         eps_infer = torch.randn(
                             x0_pred.shape,
-                            device=x0_pred.device,
+                            device=generator.device,
                             dtype=x0_pred.dtype,
                             generator=generator,
-                        )
+                        ).to(x0_pred.device)
                         s = [B] + [1] * (x.ndim - 1)
                         t_next_bcast = t_next.reshape(1).expand(s)
                         x = (1.0 - t_next_bcast) * x0_pred + t_next_bcast * eps_infer
@@ -231,24 +238,26 @@ class PidDistillModel(PidModel):
 
         sigma_val = data_batch.get("degrade_sigma", 0.0)
         if isinstance(sigma_val, torch.Tensor):
-            degrade_sigma_tensor = sigma_val.to(device="cuda", dtype=torch.float32).reshape(-1)
+            degrade_sigma_tensor = sigma_val.to(device=self.device, dtype=torch.float32).reshape(-1)
             if degrade_sigma_tensor.numel() == 1:
                 degrade_sigma_tensor = degrade_sigma_tensor.expand(B).contiguous()
             assert degrade_sigma_tensor.shape == (B,), (
                 f"data_batch['degrade_sigma'] expected [B={B}], got {tuple(degrade_sigma_tensor.shape)}"
             )
         elif isinstance(sigma_val, (list, tuple)):
-            degrade_sigma_tensor = torch.tensor(sigma_val, device="cuda", dtype=torch.float32)
+            degrade_sigma_tensor = torch.tensor(sigma_val, device=self.device, dtype=torch.float32)
             assert degrade_sigma_tensor.shape == (B,), (
                 f"data_batch['degrade_sigma'] expected length {B}, got {len(sigma_val)}"
             )
         else:
-            degrade_sigma_tensor = torch.full((B,), float(sigma_val), device="cuda", dtype=torch.float32)
+            degrade_sigma_tensor = torch.full((B,), float(sigma_val), device=self.device, dtype=torch.float32)
 
-        gen = torch.Generator(device="cuda").manual_seed(int(seed))
-        noise = torch.randn(B, 3, img_h, img_w, device="cuda", generator=gen)
+        gen = device_utils.make_generator(self.device, int(seed))
+        noise = torch.randn(B, 3, img_h, img_w, device=gen.device, generator=gen).to(self.device)
 
-        autocast_ctx = torch.autocast("cuda", dtype=self.autocast_dtype) if self.autocast_dtype else nullcontext()
+        autocast_ctx = (
+            torch.autocast(self.device.type, dtype=self.autocast_dtype) if self.autocast_dtype else nullcontext()
+        )
         self.net.eval()
         # Select the net to run: a torch.compile-wrapped net (built/cached per output
         # resolution) when --compile is armed, else the eager net.
@@ -258,7 +267,7 @@ class PidDistillModel(PidModel):
         effective_steps = num_steps if num_steps is not None else self.config.student_sample_steps
 
         if effective_steps == 1:
-            t_student = torch.full((B,), self.config.student_timestep, device="cuda", dtype=torch.float32)
+            t_student = torch.full((B,), self.config.student_timestep, device=self.device, dtype=torch.float32)
             t_student_scaled = t_student * self.fm_trainer.timescale
             with autocast_ctx:
                 v_student = net(
@@ -271,7 +280,7 @@ class PidDistillModel(PidModel):
                 )
                 x0_student = self._velocity_to_x0(noise, v_student, t_student)
         else:
-            t_list = self._get_t_list(device=torch.device("cuda"), num_steps=num_steps)
+            t_list = self._get_t_list(device=self.device, num_steps=num_steps)
             x0_student = self._student_sample_loop(
                 noise,
                 t_list,

@@ -15,6 +15,7 @@ import torch
 from pid._src.inference.inference_utils import AsyncUploader, maybe_upload_video, save_image
 from pid._src.inference.pipeline_registry import extract_latent
 from pid._src.inference.step_capture import XtCaptureCallback
+from pid._src.utils import device_utils
 from pid._src.utils.model_loader import load_model_from_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def capture_steps(
     if xt_callback is not None:
         for K in sorted(xt_callback.captured.keys()):
             xt_packed_cpu, sigma = xt_callback.captured[K]
-            xt_packed = xt_packed_cpu.to(device="cuda", dtype=dtype)
+            xt_packed = xt_packed_cpu.to(device=device_utils.get_device(), dtype=dtype)
             xt_latent = extract_latent(pipeline, SimpleNamespace(images=xt_packed), pipe_cfg, H, W)
             yield f"{K:02d}xt", xt_latent, sigma
 
@@ -98,8 +99,8 @@ def run_ours_and_save_step(
 
     data_batch = {
         model.config.input_caption_key: [caption],
-        "LQ_latent": latent.to(dtype=torch.bfloat16, device="cuda"),
-        "degrade_sigma": torch.tensor([sigma], device="cuda", dtype=torch.float32),
+        "LQ_latent": latent.to(**model.tensor_kwargs),
+        "degrade_sigma": torch.tensor([sigma], device=model.tensor_kwargs["device"], dtype=torch.float32),
     }
 
     lq_h, lq_w = baseline_01.shape[-2], baseline_01.shape[-1]
@@ -161,12 +162,15 @@ def add_noise(
     """
     if sigma <= 0.0:
         return clean_latent
+    # The generator may live on CPU (MPS has no reliable device-resident RNG); create the
+    # noise on the generator's device, then move it onto the latent's device.
+    gen_device = generator.device if generator is not None else clean_latent.device
     noise = torch.randn(
         clean_latent.shape,
         generator=generator,
-        device=clean_latent.device,
+        device=gen_device,
         dtype=clean_latent.dtype,
-    )
+    ).to(clean_latent.device)
     if backbone_tag == "sdxl":
         mean_coef = float((max(0.0, 1.0 - sigma * sigma)) ** 0.5)
         return mean_coef * clean_latent + sigma * noise

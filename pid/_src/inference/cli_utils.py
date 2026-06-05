@@ -90,6 +90,23 @@ def _add_common_decoder_args(parser: argparse.ArgumentParser, default_output_sub
     )
     parser.add_argument("--load_ema_to_reg", action="store_true", help="Load EMA weights into the regular model")
 
+    # Compute backend / precision (shared by both entrypoints).
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "mps", "cuda", "cpu"],
+        help="Compute backend. 'auto' resolves mps -> cuda -> cpu.",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="auto",
+        choices=["auto", "fp32", "bf16", "fp16"],
+        help="Compute dtype for the backbone pipeline and the PiD decoder. "
+        "'auto' = bf16 on CUDA, fp32 on MPS/CPU (MPS bf16 diverges from CUDA).",
+    )
+
     # Our decoder inference params (common)
     parser.add_argument(
         "--seed", type=int, default=default_seed, help="Base random seed (incremented per prompt/class/sample)"
@@ -167,14 +184,6 @@ def build_ldm_parser(backbone: str) -> argparse.ArgumentParser:
 
     _add_common_decoder_args(parser, default_output_subdir="official_demo")
     parser.add_argument("--group_name", type=str, default="official_demo", help="S3 group name")
-
-    parser.add_argument(
-        "--dtype",
-        type=str,
-        choices=["bf16", "fp32"],
-        default="bf16",
-        help="Backbone dtype",
-    )
 
     # Step capture (intermediate xt) — common to all backbones; range validated per-flow.
     parser.add_argument(

@@ -16,6 +16,7 @@ import os
 from contextlib import nullcontext
 
 import torch
+from pid._src.utils import device_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
@@ -424,7 +425,7 @@ class QwenImageVAE2d:
             self.model = self.model.to(dtype=dtype)
             self.context = nullcontext()
         else:
-            self.context = torch.amp.autocast("cuda", dtype=dtype)
+            self.context = torch.amp.autocast(torch.device(device).type, dtype=dtype)
 
     def count_param(self) -> int:
         return sum(p.numel() for p in self.model.parameters())
@@ -460,7 +461,8 @@ class QwenImageVAEInterface(VideoTokenizerInterface):
         self.model = QwenImageVAE2d(
             z_dim=kwargs.get("z_dim", 16),
             vae_pth=kwargs.get("vae_pth", _DEFAULT_LOCAL_CACHE),
-            dtype=torch.bfloat16,
+            dtype=device_utils.resolve_dtype(),
+            device=device_utils.get_device(),
             is_amp=False,
         )
         self.chunk_duration = chunk_duration

@@ -21,6 +21,8 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 
+from pid._src.utils import device_utils
+
 from pid._ext.imaginaire.utils.distributed import rank0_first
 from pid._ext.imaginaire.utils.env_parsers.cred_env_parser import CRED_ENVS
 from pid._ext.imaginaire.utils.s3_utils import load_from_s3_with_cache
@@ -139,7 +141,7 @@ class BasePretrainedImageVAE(BaseVAE):
             latent_mean, latent_std = load_from_s3_with_cache(
                 mean_std_fp,
                 f"vae/{self.name}_mean_std.{extention}",
-                easy_io_kwargs={"map_location": torch.device(torch.cuda.current_device())},
+                easy_io_kwargs={"map_location": device_utils.get_device()},
                 backend_args=self.backend_args,
             )
             self.register_buffer(
@@ -154,7 +156,7 @@ class BasePretrainedImageVAE(BaseVAE):
             )
         else:
             # Use zeros for mean and ones for std when load_mean_std=False
-            device = torch.device(torch.cuda.current_device()) if torch.cuda.is_available() else torch.device("cpu")
+            device = device_utils.get_device()
             self.register_buffer(
                 "latent_mean",
                 torch.zeros(*target_shape, dtype=self.dtype, device=device),
@@ -262,7 +264,7 @@ class JITVAE(BasePretrainedImageVAE):
         self.encoder = load_from_s3_with_cache(
             enc_fp,
             f"vae/{self.name}_enc.jit",
-            easy_io_kwargs={"map_location": torch.device(torch.cuda.current_device())},
+            easy_io_kwargs={"map_location": device_utils.get_device()},
             backend_args=self.backend_args,
         )
         self.encoder.eval()
@@ -280,7 +282,7 @@ class JITVAE(BasePretrainedImageVAE):
         self.decoder = load_from_s3_with_cache(
             dec_fp,
             f"vae/{self.name}_dec.jit",
-            easy_io_kwargs={"map_location": torch.device(torch.cuda.current_device())},
+            easy_io_kwargs={"map_location": device_utils.get_device()},
             backend_args=self.backend_args,
         )
         self.decoder.eval()
@@ -340,14 +342,14 @@ class StateDictVAE(BasePretrainedImageVAE):
         state_dict_enc = load_from_s3_with_cache(
             enc_fp,
             f"vae/{self.name}_enc.jit",
-            easy_io_kwargs={"map_location": torch.device(torch.cuda.current_device())},
+            easy_io_kwargs={"map_location": device_utils.get_device()},
             backend_args=self.backend_args,
         )
 
         state_dict_dec = load_from_s3_with_cache(
             dec_fp,
             f"vae/{self.name}_dec.jit",
-            easy_io_kwargs={"map_location": torch.device(torch.cuda.current_device())},
+            easy_io_kwargs={"map_location": device_utils.get_device()},
             backend_args=self.backend_args,
         )
 
