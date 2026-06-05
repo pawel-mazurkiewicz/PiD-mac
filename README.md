@@ -2,6 +2,46 @@
 
 > **TL;DR** — PiD is a plug-and-play diffusion decoder that replaces VAE/RAE decoders, turning latent representations directly into super-resolved pixels in a single pass.
 
+---
+
+## 🍎 Apple Silicon (MPS) port
+
+**This is a fork of NVIDIA's [PiD](https://github.com/nv-tlabs/PiD) that runs on Apple Silicon (M-series) GPUs via the PyTorch MPS backend — no CUDA required** (CPU fallback included). Upstream PiD is CUDA-only by convention, not by hard dependency (stock PyTorch + diffusers, no custom kernels); this fork makes the whole inference stack device-agnostic.
+
+**What works:** both entrypoints (`from_ldm` and `from_clean`) on `mps`. Verified end-to-end at 2048² super-res on **flux, sdxl, flux2, and qwenimage**; the remaining backbones (sd3, zimage, dinov2, siglip) share the same ported code paths.
+
+**How to use it:** every demo accepts two new flags —
+
+- `--device {auto,mps,cuda,cpu}` (default `auto`, resolves `mps → cuda → cpu`)
+- `--dtype {auto,fp32,bf16,fp16}` (default `auto` → **fp32 on MPS** for CUDA parity, bf16 on CUDA)
+
+Just add `--device mps` (or leave it on `auto`) to any command in this README.
+
+**MPS-specific issues this fork handles for you:**
+
+- PyTorch's **fused MPS `scaled_dot_product_attention` returns increasingly wrong values past a few-thousand tokens** (shows up as a regular grid artifact at high resolution). Net attention is replaced with an exact chunked, unfused implementation on MPS.
+- MPS has **no float64** and **no reliable device-resident RNG** — both are worked around.
+- `torch.compile` and the multi-GPU / distributed paths are CUDA-only and are skipped on MPS.
+
+**Quick start (Mac):**
+
+```bash
+uv venv --python 3.12 .venv && source .venv/bin/activate
+uv pip install torch torchvision "transformers>=4.57" "diffusers>=0.37" \
+    hydra-core omegaconf pyyaml attrs einops loguru termcolor fvcore iopath wandb \
+    imageio opencv-python-headless pandas safetensors sentencepiece boto3 botocore
+uv pip install -e .
+
+# image → VAE → PiD decode, entirely on the Apple GPU:
+PYTHONPATH=. python -m pid._src.inference.from_clean --backbone flux \
+    --input_path assets/0072.jpg --prompt "a tranquil alpine lakeside scene" \
+    --degrade_sigmas 0.0 --scale 4 --pid_inference_steps 4 --device mps
+```
+
+> Memory note: fp32 is the safe default on MPS. A 12B backbone like FLUX.1-dev for `from_ldm` is best run with `--dtype bf16` (the PiD decoder's attention stays fp32-accurate internally regardless). A 64GB+ Mac is comfortable; lower-spec machines may need bf16.
+
+---
+
 <p align="center">
   <img src="figures/teaser.jpg" alt="PiD teaser" width="100%">
 </p>
