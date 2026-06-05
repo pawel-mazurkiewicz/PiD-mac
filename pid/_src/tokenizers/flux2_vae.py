@@ -27,6 +27,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 import torch
+from pid._src.utils import device_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
@@ -459,7 +460,7 @@ class Flux2VAE:
             self.model = self.model.to(dtype=dtype)
             self.context = nullcontext()
         else:
-            self.context = torch.amp.autocast("cuda", dtype=dtype)
+            self.context = torch.amp.autocast(torch.device(device).type, dtype=dtype)
 
     def count_param(self):
         return sum(p.numel() for p in self.model.parameters())
@@ -498,7 +499,8 @@ class Flux2VAEInterface(VideoTokenizerInterface):
 
     def __init__(self, chunk_duration: int = 1, **kwargs):
         self.model = Flux2VAE(
-            dtype=torch.bfloat16,
+            dtype=device_utils.resolve_dtype(),
+            device=device_utils.get_device(),
             is_amp=False,
             vae_pth=kwargs.get("vae_pth", "./checkpoints/flux2_ae.safetensors"),
             s3_credential_path=kwargs.get("s3_credential_path", "credentials/s3_training.secret"),

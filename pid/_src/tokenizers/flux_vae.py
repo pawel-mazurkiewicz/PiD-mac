@@ -732,7 +732,8 @@ class SD3VAEInterface(VideoTokenizerInterface):
 
     def __init__(self, chunk_duration: int = 1, **kwargs):
         self.model = SD3VAE(
-            dtype=torch.bfloat16,
+            dtype=device_utils.resolve_dtype(),
+            device=device_utils.get_device(),
             is_amp=False,
             vae_pth=kwargs.get("vae_pth", "./checkpoints/sd3_vae/vae/diffusion_pytorch_model.safetensors"),
             s3_credential_path=kwargs.get("s3_credential_path", "credentials/s3_training.secret"),

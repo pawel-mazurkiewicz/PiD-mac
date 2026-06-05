@@ -41,6 +41,7 @@ from contextlib import nullcontext
 from typing import Optional
 
 import torch
+from pid._src.utils import device_utils
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -272,7 +273,7 @@ class DINOv2VAE:
             self.model = self.model.to(dtype=dtype)
             self.context = nullcontext()
         else:
-            self.context = torch.amp.autocast("cuda", dtype=dtype)
+            self.context = torch.amp.autocast(torch.device(device).type, dtype=dtype)
 
     def count_param(self):
         return sum(p.numel() for p in self.model.parameters())
@@ -407,7 +408,8 @@ class DINOv2VAEInterface(VideoTokenizerInterface):
             resize_target=resize_target,
             normalize_layernorm_affine=normalize_layernorm_affine,
             spatial_compression_factor=16,
-            dtype=torch.bfloat16,
+            dtype=device_utils.resolve_dtype(),
+            device=device_utils.get_device(),
             is_amp=False,
             pretrained_decoder_path=pretrained_decoder_path,
             normalization_stat_path=normalization_stat_path,

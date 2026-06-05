@@ -22,6 +22,7 @@ import sys
 from typing import Optional
 
 import torch
+from pid._src.utils import device_utils
 import torch.nn as nn
 
 from pid._src.tokenizers.scale_rae_decoder import GeneralDecoder
@@ -584,7 +585,10 @@ def run_scale_rae_demo(args):
     save_xt_set = sorted(set(args.save_xt_steps)) if args.save_xt_steps else []
 
     prompts = load_prompts(args)
-    dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
+    device_utils.init_device(args.device)
+    device_utils.init_dtype(args.dtype)
+    device = device_utils.get_device()
+    dtype = device_utils.resolve_dtype(device)
 
     tag = build_tag(args, "siglip")
     if is_rank0:
@@ -620,7 +624,7 @@ def run_scale_rae_demo(args):
                     decoder_config_path=decoder_config_path,
                     decoder_ckpt=decoder_ckpt_path,
                     pretrained_encoder_path=args.scale_rae_pretrained_encoder,
-                    device="cuda",
+                    device=device,
                     dtype=dtype,
                 )
             dist.barrier()
@@ -632,7 +636,7 @@ def run_scale_rae_demo(args):
             decoder_config_path=decoder_config_path,
             decoder_ckpt=decoder_ckpt_path,
             pretrained_encoder_path=args.scale_rae_pretrained_encoder,
-            device="cuda",
+            device=device,
             dtype=dtype,
         )
 
@@ -664,7 +668,8 @@ def run_scale_rae_demo(args):
         sample_id = f"{prompt_idx:08d}"
         # Scale-RAE's autoregressive LM uses torch.manual_seed for sampling determinism.
         torch.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
 
         if capture_state is not None:
             capture_state["captured"] = {}
