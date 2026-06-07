@@ -8,37 +8,82 @@
 
 **This is a fork of NVIDIA's [PiD](https://github.com/nv-tlabs/PiD) that runs on Apple Silicon (M-series) GPUs via the PyTorch MPS backend — no CUDA required** (CPU fallback included). Upstream PiD is CUDA-only by convention, not by hard dependency (stock PyTorch + diffusers, no custom kernels); this fork makes the whole inference stack device-agnostic.
 
-**What works:** both entrypoints (`from_ldm` and `from_clean`) on `mps`. Verified end-to-end at 2048² super-res on **flux, sdxl, flux2, and qwenimage**; the remaining backbones (sd3, zimage, dinov2, siglip) share the same ported code paths.
+Every demo accepts two new flags, and otherwise behaves exactly like upstream:
 
-**How to use it:** every demo accepts two new flags —
+- `--device {auto,mps,cuda,cpu}` — default `auto`, resolves `mps → cuda → cpu`. An explicit `--device cuda`/`mps` that isn't available fails fast with a clear message.
+- `--dtype {auto,fp32,bf16,fp16}` — default `auto` → **fp32 on MPS** (for CUDA parity), bf16 on CUDA.
 
-- `--device {auto,mps,cuda,cpu}` (default `auto`, resolves `mps → cuda → cpu`)
-- `--dtype {auto,fp32,bf16,fp16}` (default `auto` → **fp32 on MPS** for CUDA parity, bf16 on CUDA)
-
-Just add `--device mps` (or leave it on `auto`) to any command in this README.
-
-**MPS-specific issues this fork handles for you:**
-
-- PyTorch's **fused MPS `scaled_dot_product_attention` returns increasingly wrong values past a few-thousand tokens** (shows up as a regular grid artifact at high resolution). Net attention is replaced with an exact chunked, unfused implementation on MPS.
-- MPS has **no float64** and **no reliable device-resident RNG** — both are worked around.
-- `torch.compile` and the multi-GPU / distributed paths are CUDA-only and are skipped on MPS.
-
-**Quick start (Mac):**
+### 1. Install (Mac)
 
 ```bash
-uv venv --python 3.12 .venv && source .venv/bin/activate
+uv venv --python 3.12 .venv && source .venv/bin/activate   # Python 3.11–3.13
 uv pip install torch torchvision "transformers>=4.57" "diffusers>=0.37" \
     hydra-core omegaconf pyyaml attrs einops loguru termcolor fvcore iopath wandb \
     imageio opencv-python-headless pandas safetensors sentencepiece boto3 botocore
 uv pip install -e .
+```
 
-# image → VAE → PiD decode, entirely on the Apple GPU:
+No conda needed. Requires a PyTorch build with MPS (≥ 2.3; tested on 2.12). `verify_env.py` is CUDA-oriented — skip it on Mac.
+
+### 2. Download checkpoints
+
+Pull the PiD decoder + the backbone's VAE from [nvidia/PiD](https://huggingface.co/nvidia/PiD). For a first **flux** run:
+
+```bash
+hf download nvidia/PiD checkpoints/PiD_res2k_sr4x_official_flux_distill_4step/model_ema_bf16.pth --local-dir .
+hf download nvidia/PiD checkpoints/ae.safetensors --local-dir .
+```
+
+The `gemma-2-2b-it` text encoder (~10 GB) is fetched automatically on first run. For `from_ldm`, the backbone's diffusers pipeline (e.g. `black-forest-labs/FLUX.1-dev`, ~24 GB, gated) is also fetched on first use. Per-backbone VAE files and decoder paths are listed in [docs/checkpoints.md](docs/checkpoints.md); the matrix below names the VAE each backbone needs.
+
+### 3. Run
+
+`from_clean` (image → VAE encode → PiD decode), entirely on the Apple GPU:
+
+```bash
 PYTHONPATH=. python -m pid._src.inference.from_clean --backbone flux \
     --input_path assets/0072.jpg --prompt "a tranquil alpine lakeside scene" \
     --degrade_sigmas 0.0 --scale 4 --pid_inference_steps 4 --device mps
 ```
 
-> Memory note: fp32 is the safe default on MPS. A 12B backbone like FLUX.1-dev for `from_ldm` is best run with `--dtype bf16` (the PiD decoder's attention stays fp32-accurate internally regardless). A 64GB+ Mac is comfortable; lower-spec machines may need bf16.
+`from_ldm` (text → backbone diffusion → PiD decode). bf16 is recommended here — a 12B Flux backbone in fp32 is ~70 GB and slow:
+
+```bash
+PYTHONPATH=. python -m pid._src.inference.from_ldm --backbone flux \
+    --prompt "a brown tabby cat on a wooden table, soft morning light" \
+    --resolution 2048 --ldm_inference_steps 28 --save_xt_steps 24 \
+    --pid_inference_steps 4 --device mps --dtype bf16
+```
+
+### What to expect
+
+| Backbone | VAE weight | `from_clean` | `from_ldm` |
+|----------|------------|:------------:|:----------:|
+| flux | `ae.safetensors` | ✅ verified | ✅ verified |
+| sdxl | `sdxl_vae.safetensors` | ✅ verified | ⚙️ ported |
+| flux2 | `flux2_ae.safetensors` | ✅ verified | ⚙️ ported |
+| qwenimage | `QwenImage_VAE_2d.pth` | ✅ verified | ⚙️ ported |
+| sd3 | SD3 VAE | ⚙️ ported | ⚙️ ported |
+| zimage / -turbo | reuses flux VAE | ⚙️ ported | ⚙️ ported |
+| dinov2 / siglip | RAE / Scale-RAE | ⚙️ ported † | ⚙️ ported † |
+
+✅ = run end-to-end on MPS and visually verified (clean 2048² output, no artifacts). ⚙️ = device-plumbed and shares a verified code path, but not individually run here. † dinov2/siglip also need their external RAE LDM setup (see [`docs/dinov2_siglip.md`](docs/dinov2_siglip.md)).
+
+**Performance & memory** (measured on an M5 Max / 128 GB; your mileage varies):
+
+- First run downloads weights; afterwards model load is ~10–20 s from cache.
+- `from_ldm` Flux backbone at 512px latent runs ~1.2 it/s in bf16.
+- A 2048² 4-step PiD decode takes a couple of minutes in fp32; bf16 is faster and lighter.
+- fp32 PiD decoder + a VAE + gemma is comfortable on **64 GB+**. For `from_ldm` the bf16 FLUX.1-dev backbone is ~24 GB — use `--dtype bf16`. On 16–32 GB machines, prefer `from_clean`, bf16, and smaller `--scale`/resolution.
+- Output is clean super-res at any resolution — the grid/tiling artifact from PyTorch's fused MPS attention is fixed (see below).
+
+### MPS-specific issues this fork handles for you
+
+- PyTorch's **fused MPS `scaled_dot_product_attention` returns increasingly wrong values past a few-thousand tokens** (a regular grid artifact at high resolution). Net attention uses an exact chunked, unfused (matmul→softmax→matmul, fp32) implementation on MPS; the fused kernel is kept on CUDA/CPU.
+- MPS has **no float64** and **no reliable device-resident RNG** — both are worked around (fp32 high-precision math; noise drawn on a CPU generator then moved on-device).
+- `torch.compile` and the multi-GPU / distributed (`pynvml`/NCCL) paths are CUDA-only and are skipped/guarded on MPS.
+
+> Troubleshooting: a first run feels slow because it's downloading multi-GB weights — watch `~/.cache/huggingface`. If a backbone errors on a missing checkpoint, re-check step 2 for that backbone's VAE file. If you hit an unsupported-op error, it should fall back automatically (`PYTORCH_ENABLE_MPS_FALLBACK=1` is set for you).
 
 ---
 
