@@ -5,6 +5,10 @@
 ---
 
 ## 🍎 Apple Silicon (MPS) port
+<img width="1438" height="618" alt="image" src="https://github.com/user-attachments/assets/477e95a4-2f01-4815-8dee-bfee6e67d841" />
+
+_Kitty looks way more sharp_
+
 
 **This is a fork of NVIDIA's [PiD](https://github.com/nv-tlabs/PiD) that runs on Apple Silicon (M-series) GPUs via the PyTorch MPS backend — no CUDA required** (CPU fallback included). Upstream PiD is CUDA-only by convention, not by hard dependency (stock PyTorch + diffusers, no custom kernels); this fork makes the whole inference stack device-agnostic.
 
